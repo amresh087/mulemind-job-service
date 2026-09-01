@@ -9,8 +9,14 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.mulemind.job.dto.DocumentRequest;
 import com.mulemind.job.dto.DocumentResponse;
+import com.mulemind.job.dto.JobResponse;
+import com.mulemind.job.dto.JobStatusHistoryResponse;
 import com.mulemind.job.entity.DocumentRecord;
+import com.mulemind.job.entity.JobStatus;
+import com.mulemind.job.entity.JobStatusHistory;
 import com.mulemind.job.repository.DocumentRepository;
+import com.mulemind.job.repository.JobStatusHistoryRepository;
+import com.mulemind.job.repository.JobStatusRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,6 +26,8 @@ public class DocumentService {
 
     private final DocumentStorageService documentStorageService;
     private final DocumentRepository documentRepository;
+    private final JobStatusRepository jobStatusRepository;
+    private final JobStatusHistoryRepository jobStatusHistoryRepository;
 
     public DocumentResponse create(DocumentRequest request) {
         DocumentRecord record = DocumentRecord.builder()
@@ -27,14 +35,13 @@ public class DocumentService {
                 .name(request.getName())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .transactionTypeCode(request.getTransactionTypeCode())
-                .version(request.getVersion())
-                .status(request.getStatus() != null ? request.getStatus() : "Indexed")
+                .status(resolveStatus(request.getStatus()))
                 .contentType(normalizeContentType(request.getContentType(), request.getName()))
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
         DocumentRecord saved = documentRepository.save(record);
+        recordStatusHistory(saved, saved.getStatus());
         return toResponse(saved);
     }
 
@@ -63,15 +70,14 @@ public class DocumentService {
                 .name(request.getName() != null ? request.getName() : file.getOriginalFilename())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .transactionTypeCode(request.getTransactionTypeCode())
-                .version(request.getVersion())
-                .status(request.getStatus() != null ? request.getStatus() : "Indexed")
+                .status(resolveStatus(request.getStatus()))
                 .contentType(contentType)
                 .objectName(storageKey)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
         DocumentRecord saved = documentRepository.save(record);
+        recordStatusHistory(saved, saved.getStatus());
         return toResponse(saved);
     }
 
@@ -79,10 +85,22 @@ public class DocumentService {
         return documentRepository.findAll().stream().map(this::toResponse).toList();
     }
 
+    public List<JobResponse> getAllJobs() {
+        return documentRepository.findAll().stream().map(this::toJobResponse).toList();
+    }
+
     public DocumentResponse getById(UUID id) {
-        DocumentRecord record = documentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Document not found"));
+        DocumentRecord record = getDocumentEntityById(id);
         return toResponse(record);
+    }
+
+    public JobResponse getJobById(UUID id) {
+        return toJobResponse(getDocumentEntityById(id));
+    }
+
+    public DocumentRecord getDocumentEntityById(UUID id) {
+        return documentRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Document not found"));
     }
 
     public DocumentResponse update(UUID id, DocumentRequest request) {
@@ -92,8 +110,7 @@ public class DocumentService {
         String updatedName = request.getName() != null ? request.getName() : existing.getName();
         String updatedType = normalizeType(request.getType() != null ? request.getType() : existing.getType());
         String updatedTenant = request.getTenant() != null ? request.getTenant() : existing.getTenant();
-        String updatedVersion = request.getVersion() != null ? request.getVersion() : existing.getVersion();
-        String updatedStatus = request.getStatus() != null ? request.getStatus() : existing.getStatus();
+        JobStatus updatedStatus = resolveStatus(request.getStatus() != null ? request.getStatus() : statusCode(existing.getStatus()));
         String updatedContentType = normalizeContentType(request.getContentType(), updatedName);
 
         String newObjectName = existing.getObjectName();
@@ -112,8 +129,6 @@ public class DocumentService {
                 .name(updatedName)
                 .type(updatedType)
                 .tenant(updatedTenant)
-                .transactionTypeCode(request.getTransactionTypeCode() != null ? request.getTransactionTypeCode() : existing.getTransactionTypeCode())
-                .version(updatedVersion)
                 .status(updatedStatus)
                 .contentType(updatedContentType)
                 .objectName(newObjectName)
@@ -121,7 +136,35 @@ public class DocumentService {
                 .updatedAt(LocalDateTime.now())
                 .build();
         DocumentRecord saved = documentRepository.save(updated);
+        if (!statusCode(existing.getStatus()).equals(statusCode(saved.getStatus()))) {
+            recordStatusHistory(saved, saved.getStatus());
+        }
         return toResponse(saved);
+    }
+
+    public JobResponse updateJob(UUID id, DocumentRequest request) {
+        return toJobResponse(update(id, request));
+    }
+
+    public JobResponse updateJobStatus(UUID id, DocumentRequest request) {
+        DocumentRecord existing = documentRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Document not found"));
+
+        String newStatusCode = request.getStatus();
+        if (newStatusCode == null || newStatusCode.isBlank()) {
+            throw new IllegalArgumentException("Status cannot be blank");
+        }
+
+        JobStatus newStatus = resolveStatus(newStatusCode);
+        if (!statusCode(existing.getStatus()).equals(newStatus.getCode())) {
+            existing.setStatus(newStatus);
+            existing.setUpdatedAt(LocalDateTime.now());
+            DocumentRecord saved = documentRepository.save(existing);
+            recordStatusHistory(saved, saved.getStatus());
+            return toJobResponse(saved);
+        }
+
+        return toJobResponse(existing);
     }
 
     public void delete(UUID id) {
@@ -143,12 +186,91 @@ public class DocumentService {
                 .tenant(record.getTenant())
                 .transactionTypeCode(record.getTransactionTypeCode())
                 .version(record.getVersion())
-                .status(record.getStatus())
+                .status(record.getStatus() != null ? record.getStatus().getCode() : null)
                 .contentType(record.getContentType())
                 .objectName(record.getObjectName())
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
                 .build();
+    }
+
+    private JobResponse toJobResponse(DocumentRecord record) {
+        return JobResponse.builder()
+                .id(record.getId())
+                .name(record.getName())
+                .type(record.getType())
+                .tenant(record.getTenant())
+                .transactionTypeCode(record.getTransactionTypeCode())
+                .version(record.getVersion())
+                .status(record.getStatus() != null ? record.getStatus().getCode() : null)
+                .createdAt(record.getCreatedAt())
+                .updatedAt(record.getUpdatedAt())
+                .build();
+    }
+
+    private JobResponse toJobResponse(DocumentResponse response) {
+        return JobResponse.builder()
+                .id(response.getId())
+                .name(response.getName())
+                .type(response.getType())
+                .tenant(response.getTenant())
+                .transactionTypeCode(response.getTransactionTypeCode())
+                .version(response.getVersion())
+                .status(response.getStatus())
+                .createdAt(response.getCreatedAt())
+                .updatedAt(response.getUpdatedAt())
+                .build();
+    }
+
+    private JobStatus resolveStatus(String statusCode) {
+        String normalized = statusCode == null || statusCode.isBlank() ? "Indexed" : statusCode.trim();
+        return jobStatusRepository.findByCode(normalized)
+                .orElseGet(() -> {
+                    LocalDateTime now = LocalDateTime.now();
+                    JobStatus newStatus = JobStatus.builder()
+                            .code(normalized)
+                            .description(normalized)
+                            .createdAt(now)
+                            .updatedAt(now)
+                            .build();
+                    return jobStatusRepository.save(newStatus);
+                });
+    }
+
+    private void recordStatusHistory(DocumentRecord document, JobStatus status) {
+        if (document == null || status == null) {
+            return;
+        }
+
+        JobStatusHistory history = JobStatusHistory.builder()
+                .document(document)
+                .status(status)
+                .changedAt(LocalDateTime.now())
+                .build();
+
+        jobStatusHistoryRepository.save(history);
+    }
+
+    public List<JobStatusHistoryResponse> getStatusHistory(UUID documentId) {
+        DocumentRecord document = getDocumentEntityById(documentId);
+        return jobStatusHistoryRepository.findByDocumentOrderByChangedAtAsc(document)
+                .stream()
+                .map(this::toHistoryResponse)
+                .toList();
+    }
+
+    private JobStatusHistoryResponse toHistoryResponse(JobStatusHistory history) {
+        return JobStatusHistoryResponse.builder()
+                .id(history.getId())
+                .documentId(history.getDocument() != null ? history.getDocument().getId() : null)
+                .statusCode(history.getStatus() != null ? history.getStatus().getCode() : null)
+                .statusDescription(history.getStatus() != null ? history.getStatus().getDescription() : null)
+                .changedAt(history.getChangedAt())
+                .build();
+    }
+
+    private String statusCode(JobStatus status) {
+        return status == null ? null : status.getCode();
     }
 
     private String buildObjectName(UUID documentId, String tenant, String type, String originalFileName) {

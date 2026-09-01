@@ -7,8 +7,6 @@ public class DocumentRequest {
     private String name;
     private String type;
     private String tenant;
-    private String transactionTypeCode;
-    private String version;
     private String status;
     private String contentType;
 }
