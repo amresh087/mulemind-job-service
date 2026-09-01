@@ -2,6 +2,7 @@ package com.mulemind.job.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 
@@ -38,5 +39,19 @@ class DocumentStatusHistoryServiceTest {
         assertNotNull(history);
         assertEquals(1, history.size());
         assertEquals("Indexed", history.get(0).getStatus().getCode());
+    }
+
+    @Test
+    void shouldDeleteDocumentAndItsStatusHistory() {
+        DocumentRequest request = new DocumentRequest();
+        request.setName("delete-history-test.pdf");
+        request.setType("PDF");
+        request.setTenant("tenant-1");
+        request.setStatus("Indexed");
+
+        var created = documentService.create(request);
+        documentService.delete(created.getId());
+
+        assertThrows(IllegalArgumentException.class, () -> documentService.getDocumentEntityById(created.getId()));
     }
 }

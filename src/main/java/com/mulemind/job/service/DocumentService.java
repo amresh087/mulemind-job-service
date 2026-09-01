@@ -45,6 +45,13 @@ public class DocumentService {
         return toResponse(saved);
     }
 
+    /**
+     * 
+     * @param request
+     * @param file
+     * @return
+     */
+
     public DocumentResponse createWithFile(DocumentRequest request, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File must be provided for upload");
@@ -65,17 +72,23 @@ public class DocumentService {
             throw new IllegalStateException("Unable to store uploaded file", ex);
         }
 
+        String initialStatus = storageKey!= null && !storageKey.isBlank()? "Uploaded":"Created";
+
         DocumentRecord record = DocumentRecord.builder()
                 .id(documentId)
                 .name(request.getName() != null ? request.getName() : file.getOriginalFilename())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .status(resolveStatus(request.getStatus()))
+                .status(resolveStatus(initialStatus))
                 .contentType(contentType)
                 .objectName(storageKey)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+
+        
+
+
         DocumentRecord saved = documentRepository.save(record);
         recordStatusHistory(saved, saved.getStatus());
         return toResponse(saved);
@@ -171,11 +184,16 @@ public class DocumentService {
         DocumentRecord existing = documentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
 
+        List<JobStatusHistory> historyEntries = jobStatusHistoryRepository.findByDocumentOrderByChangedAtAsc(existing);
+        if (!historyEntries.isEmpty()) {
+            jobStatusHistoryRepository.deleteAll(historyEntries);
+        }
+
         if (existing.getObjectName() != null && !existing.getObjectName().isBlank()) {
             documentStorageService.deleteFile(existing.getObjectName());
         }
 
-        documentRepository.deleteById(id);
+        documentRepository.delete(existing);
     }
 
     private DocumentResponse toResponse(DocumentRecord record) {
@@ -223,7 +241,7 @@ public class DocumentService {
     }
 
     private JobStatus resolveStatus(String statusCode) {
-        String normalized = statusCode == null || statusCode.isBlank() ? "Indexed" : statusCode.trim();
+        String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
         return jobStatusRepository.findByCode(normalized)
                 .orElseGet(() -> {
                     LocalDateTime now = LocalDateTime.now();
