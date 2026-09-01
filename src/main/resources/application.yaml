@@ -1,0 +1,22 @@
+server:
+  port: 5054
+
+spring:
+  application:
+    name: mulemind-job-service
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/mulemind_db
+    username: root
+    password: ellenverma
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: documents
