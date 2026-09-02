@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/jobs")
+@RequestMapping("/documents/jobs")
 public class JobController {
 
     private final DocumentService documentService;
@@ -49,6 +49,7 @@ public class JobController {
     public JobResponse updateJobStatus(@PathVariable UUID id, @RequestBody Map<String, String> payload) {
         DocumentRequest request = new DocumentRequest();
         request.setStatus(payload.get("status"));
-        return documentService.updateJobStatus(id, request);
+        JobResponse jobResponse = documentService.updateJobStatus(id, request);
+        return jobResponse;
     }
 }
