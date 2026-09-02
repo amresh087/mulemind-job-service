@@ -1,12 +1,12 @@
 package com.mulemind.job.service;
-
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
-
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-
+import com.mulemind.job.dto.DocumentKafkaEvent;
 import com.mulemind.job.dto.DocumentRequest;
 import com.mulemind.job.dto.DocumentResponse;
 import com.mulemind.job.dto.JobResponse;
@@ -17,7 +17,6 @@ import com.mulemind.job.entity.JobStatusHistory;
 import com.mulemind.job.repository.DocumentRepository;
 import com.mulemind.job.repository.JobStatusHistoryRepository;
 import com.mulemind.job.repository.JobStatusRepository;
-
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -28,7 +27,17 @@ public class DocumentService {
     private final DocumentRepository documentRepository;
     private final JobStatusRepository jobStatusRepository;
     private final JobStatusHistoryRepository jobStatusHistoryRepository;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
+    @Value("${spring.kafka.topics.mulemind-events}")
+    private String documentEventsTopic;
+
+
+    /**
+     * Creates a new document record based on the provided request.
+     * @param request
+     * @return
+     */
     public DocumentResponse create(DocumentRequest request) {
         DocumentRecord record = DocumentRecord.builder()
                 .id(UUID.randomUUID())
@@ -46,7 +55,7 @@ public class DocumentService {
     }
 
     /**
-     * 
+     * Creates a new document record with an associated file.
      * @param request
      * @param file
      * @return
@@ -60,9 +69,7 @@ public class DocumentService {
         UUID documentId = UUID.randomUUID();
         String contentType = normalizeContentType(request.getContentType(), file.getOriginalFilename());
         String objectName = buildObjectName(documentId,
-                request.getTenant(),
-                normalizeType(request.getType()),
-                file.getOriginalFilename());
+                request.getTenant(),normalizeType(request.getType()),file.getOriginalFilename());
 
         String storageKey;
         try {
@@ -86,36 +93,65 @@ public class DocumentService {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        
-
-
         DocumentRecord saved = documentRepository.save(record);
         recordStatusHistory(saved, saved.getStatus());
+        // Publish document event
+        publishDocumentEvent(saved);
+
         return toResponse(saved);
     }
 
+    /**
+     * Retrieves all documents.
+     * @return
+     */
     public List<DocumentResponse> getAll() {
         return documentRepository.findAll().stream().map(this::toResponse).toList();
     }
 
+    /**
+     * Retrieves all jobs.
+     * @return
+     */
     public List<JobResponse> getAllJobs() {
         return documentRepository.findAll().stream().map(this::toJobResponse).toList();
     }
 
+    /**
+     * Retrieves a document by its ID.
+     * @param id
+     * @return
+     */
     public DocumentResponse getById(UUID id) {
         DocumentRecord record = getDocumentEntityById(id);
         return toResponse(record);
     }
 
+    /**
+     * Retrieves a job by its ID.
+     * @param id
+     * @return
+     */
     public JobResponse getJobById(UUID id) {
         return toJobResponse(getDocumentEntityById(id));
     }
 
+    /**
+     * Retrieves the DocumentRecord entity by its ID.
+     * @param id
+     * @return
+     */
     public DocumentRecord getDocumentEntityById(UUID id) {
         return documentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
     }
 
+    /**
+     * Updates a document by its ID.
+     * @param id
+     * @param request
+     * @return
+     */
     public DocumentResponse update(UUID id, DocumentRequest request) {
         DocumentRecord existing = documentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
@@ -155,10 +191,22 @@ public class DocumentService {
         return toResponse(saved);
     }
 
+    /**
+     * Updates a job by its ID.
+     * @param id
+     * @param request
+     * @return
+     */
     public JobResponse updateJob(UUID id, DocumentRequest request) {
         return toJobResponse(update(id, request));
     }
 
+    /**
+     * Updates the job status for a document by its ID.
+     * @param id
+     * @param request
+     * @return
+     */
     public JobResponse updateJobStatus(UUID id, DocumentRequest request) {
         DocumentRecord existing = documentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
@@ -180,6 +228,10 @@ public class DocumentService {
         return toJobResponse(existing);
     }
 
+    /**
+     * Deletes a document by its ID.
+     * @param id
+     */
     public void delete(UUID id) {
         DocumentRecord existing = documentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
@@ -196,6 +248,11 @@ public class DocumentService {
         documentRepository.delete(existing);
     }
 
+    /**
+     * Converts a DocumentRecord entity to a DocumentResponse DTO.
+     * @param record
+     * @return
+     */
     private DocumentResponse toResponse(DocumentRecord record) {
         return DocumentResponse.builder()
                 .id(record.getId())
@@ -212,6 +269,11 @@ public class DocumentService {
                 .build();
     }
 
+    /**
+     * Converts a DocumentRecord entity to a JobResponse DTO.
+     * @param record
+     * @return
+     */
     private JobResponse toJobResponse(DocumentRecord record) {
         return JobResponse.builder()
                 .id(record.getId())
@@ -226,6 +288,11 @@ public class DocumentService {
                 .build();
     }
 
+    /**
+     * Converts a DocumentResponse DTO to a JobResponse DTO.
+     * @param response
+     * @return
+     */
     private JobResponse toJobResponse(DocumentResponse response) {
         return JobResponse.builder()
                 .id(response.getId())
@@ -240,6 +307,12 @@ public class DocumentService {
                 .build();
     }
 
+    /**
+     * Resolves the JobStatus entity based on the provided status code.
+     * If the status code is not found, a new JobStatus entity is created and saved.
+     * @param statusCode
+     * @return
+     */
     private JobStatus resolveStatus(String statusCode) {
         String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
         return jobStatusRepository.findByCode(normalized)
@@ -255,20 +328,55 @@ public class DocumentService {
                 });
     }
 
+    /**
+     * Records the status history for a document.
+     * @param document
+     * @param status
+     */
     private void recordStatusHistory(DocumentRecord document, JobStatus status) {
         if (document == null || status == null) {
             return;
         }
 
         JobStatusHistory history = JobStatusHistory.builder()
-                .document(document)
-                .status(status)
-                .changedAt(LocalDateTime.now())
-                .build();
+        .document(document).status(status).changedAt(LocalDateTime.now())
+        .build();
 
         jobStatusHistoryRepository.save(history);
     }
 
+    /**
+     * Publishes the document event to Kafka after a document is created or updated.
+     *
+     * @param document the persisted document
+     */
+    private void publishDocumentEvent(DocumentRecord document) {
+        if (document == null) {
+            return;
+        }
+
+        DocumentKafkaEvent event = DocumentKafkaEvent.builder()
+                .id(document.getId())
+                .name(document.getName())
+                .type(document.getType())
+                .tenant(document.getTenant())
+                .transactionTypeCode(document.getTransactionTypeCode())
+                .version(document.getVersion())
+                .status(document.getStatus() != null ? document.getStatus().getCode() : null)
+                .contentType(document.getContentType())
+                .objectName(document.getObjectName())
+                .createdAt(document.getCreatedAt())
+                .updatedAt(document.getUpdatedAt())
+                .build();
+
+        kafkaTemplate.send(documentEventsTopic, document.getId().toString(), event);
+    }
+
+    /**
+     * Retrieves the status history for a document by its ID.
+     * @param documentId
+     * @return
+     */
     public List<JobStatusHistoryResponse> getStatusHistory(UUID documentId) {
         DocumentRecord document = getDocumentEntityById(documentId);
         return jobStatusHistoryRepository.findByDocumentOrderByChangedAtAsc(document)
@@ -277,6 +385,11 @@ public class DocumentService {
                 .toList();
     }
 
+    /**
+     * Converts a JobStatusHistory entity to a JobStatusHistoryResponse DTO.
+     * @param history
+     * @return
+     */
     private JobStatusHistoryResponse toHistoryResponse(JobStatusHistory history) {
         return JobStatusHistoryResponse.builder()
                 .id(history.getId())
@@ -287,10 +400,23 @@ public class DocumentService {
                 .build();
     }
 
+    /**
+     * Retrieves the status code from a JobStatus entity.
+     * @param status
+     * @return
+     */
     private String statusCode(JobStatus status) {
         return status == null ? null : status.getCode();
     }
 
+    /**
+     * Builds a safe object name for storage based on the document ID, tenant, type, and original file name.
+     * @param documentId
+     * @param tenant
+     * @param type
+     * @param originalFileName
+     * @return
+     */
     private String buildObjectName(UUID documentId, String tenant, String type, String originalFileName) {
         String safeTenant = tenant == null ? "tenant" : tenant.replaceAll("[^a-zA-Z0-9_.-]", "_");
         String safeType = type == null ? "PDF" : type.replaceAll("[^a-zA-Z0-9_.-]", "_");
@@ -298,6 +424,11 @@ public class DocumentService {
         return String.format("tenant-%s/%s/%s", safeTenant, safeType, safeFileName);
     }
 
+    /**
+     * Normalizes the document type. If null or blank, defaults to "PDF".
+     * @param type
+     * @return
+     */
     private String normalizeType(String type) {
         if (type == null || type.isBlank()) {
             return "PDF";
@@ -305,6 +436,12 @@ public class DocumentService {
         return type.trim().toUpperCase();
     }
 
+    /**
+     * Normalizes the content type based on the file name.
+     * @param contentType
+     * @param name
+     * @return
+     */
     private String normalizeContentType(String contentType, String name) {
         if (contentType != null && !contentType.isBlank()) {
             return contentType;
