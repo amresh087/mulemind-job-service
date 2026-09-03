@@ -45,7 +45,7 @@ public class DocumentService {
                 .name(request.getName())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .status(resolveStatus(request.getStatus(), request.getDescription()))
+                .status(createStatus(request.getStatus(), request.getDescription()))
                 .contentType(normalizeContentType(request.getContentType(), request.getName()))
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
@@ -87,7 +87,7 @@ public class DocumentService {
                 .name(request.getName() != null ? request.getName() : file.getOriginalFilename())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .status(resolveStatus(initialStatus, request.getDescription()))
+                .status(createStatus(initialStatus, request.getDescription()))
                 .contentType(contentType)
                 .objectName(storageKey)
                 .createdAt(LocalDateTime.now())
@@ -211,6 +211,7 @@ public class DocumentService {
     public JobResponse updateJobStatus(UUID id, DocumentRequest request) {
         DocumentRecord existing = documentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
+        String previousStatusCode = statusCode(existing.getStatus());
 
         String newStatusCode = request.getStatus();
         String newDescription = request.getDescription();
@@ -226,7 +227,7 @@ public class DocumentService {
         }
 
 
-        if (!Objects.equals(statusCode(existing.getStatus()), newStatus.getCode())) {
+        if (!Objects.equals(previousStatusCode, newStatus.getCode())) {
             existing.setStatus(newStatus);
             existing.setUpdatedAt(LocalDateTime.now());
             DocumentRecord saved = documentRepository.save(existing);
@@ -338,6 +339,19 @@ public class DocumentService {
                 });
     }
 
+    private JobStatus createStatus(String statusCode, String description) {
+        String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
+        String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
+        LocalDateTime now = LocalDateTime.now();
+        JobStatus newStatus = JobStatus.builder()
+                .code(normalized)
+                .description(normalizedDescription)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        return jobStatusRepository.save(newStatus);
+    }
+
     private JobStatus resolveStatusByID(String statusCode, String description,UUID existingStatusId) {
         String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
         String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
@@ -361,7 +375,11 @@ public class DocumentService {
         }
 
         JobStatusHistory history = JobStatusHistory.builder()
-        .document(document).status(status).changedAt(LocalDateTime.now())
+        .document(document)
+        .status(status)
+        .statusCode(status.getCode())
+        .statusDescription(status.getDescription())
+        .changedAt(LocalDateTime.now())
         .build();
 
         jobStatusHistoryRepository.save(history);
@@ -416,8 +434,12 @@ public class DocumentService {
         return JobStatusHistoryResponse.builder()
                 .id(history.getId())
                 .documentId(history.getDocument() != null ? history.getDocument().getId() : null)
-                .statusCode(history.getStatus() != null ? history.getStatus().getCode() : null)
-                .statusDescription(history.getStatus() != null ? history.getStatus().getDescription() : null)
+                .statusCode(history.getStatusCode() != null
+                    ? history.getStatusCode()
+                    : history.getStatus() != null ? history.getStatus().getCode() : null)
+                .statusDescription(history.getStatusDescription() != null
+                    ? history.getStatusDescription()
+                    : history.getStatus() != null ? history.getStatus().getDescription() : null)
                 .changedAt(history.getChangedAt())
                 .build();
     }

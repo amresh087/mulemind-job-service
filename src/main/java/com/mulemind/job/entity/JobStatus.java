@@ -31,7 +31,7 @@ public class JobStatus {
     @Column(length = 36, nullable = false, updatable = false)
     private UUID id;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String code;
 
     private String description;

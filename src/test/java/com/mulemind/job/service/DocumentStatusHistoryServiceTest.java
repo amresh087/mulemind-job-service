@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,5 +54,36 @@ class DocumentStatusHistoryServiceTest {
         documentService.delete(created.getId());
 
         assertThrows(IllegalArgumentException.class, () -> documentService.getDocumentEntityById(created.getId()));
+    }
+
+    @Test
+    void shouldCreateHistoryEntryForEachStatusUpdate() {
+        String suffix = UUID.randomUUID().toString();
+        String createdStatus = "Created-" + suffix;
+        String processingStatus = "Processing-" + suffix;
+        String completedStatus = "Completed-" + suffix;
+        DocumentRequest createRequest = new DocumentRequest();
+        createRequest.setName("multiple-history-test.pdf");
+        createRequest.setType("PDF");
+        createRequest.setTenant("tenant-1");
+        createRequest.setStatus(createdStatus);
+
+        var created = documentService.create(createRequest);
+
+        DocumentRequest processingRequest = new DocumentRequest();
+        processingRequest.setStatus(processingStatus);
+        documentService.updateJobStatus(created.getId(), processingRequest);
+
+        DocumentRequest completedRequest = new DocumentRequest();
+        completedRequest.setStatus(completedStatus);
+        documentService.updateJobStatus(created.getId(), completedRequest);
+
+        List<JobStatusHistory> history = jobStatusHistoryRepository.findByDocumentOrderByChangedAtAsc(
+                documentService.getDocumentEntityById(created.getId()));
+
+        assertEquals(3, history.size());
+        assertEquals(createdStatus, history.get(0).getStatusCode());
+        assertEquals(processingStatus, history.get(1).getStatusCode());
+        assertEquals(completedStatus, history.get(2).getStatusCode());
     }
 }

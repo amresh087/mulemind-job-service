@@ -42,6 +42,12 @@ public class JobStatusHistory {
     @JoinColumn(name = "status_id", nullable = false)
     private JobStatus status;
 
+    @Column(name = "status_code")
+    private String statusCode;
+
+    @Column(name = "status_description")
+    private String statusDescription;
+
     @Column(name = "changed_at", nullable = false)
     private LocalDateTime changedAt;
 }
