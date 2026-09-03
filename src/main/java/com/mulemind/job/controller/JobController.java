@@ -49,6 +49,7 @@ public class JobController {
     public JobResponse updateJobStatus(@PathVariable UUID id, @RequestBody Map<String, String> payload) {
         DocumentRequest request = new DocumentRequest();
         request.setStatus(payload.get("status"));
+        request.setDescription(payload.get("description"));
         JobResponse jobResponse = documentService.updateJobStatus(id, request);
         return jobResponse;
     }

@@ -8,5 +8,6 @@ public class DocumentRequest {
     private String type;
     private String tenant;
     private String status;
+    private String description;
     private String contentType;
 }

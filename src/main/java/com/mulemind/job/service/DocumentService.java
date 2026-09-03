@@ -1,6 +1,7 @@
 package com.mulemind.job.service;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -44,7 +45,7 @@ public class DocumentService {
                 .name(request.getName())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .status(resolveStatus(request.getStatus()))
+                .status(resolveStatus(request.getStatus(), request.getDescription()))
                 .contentType(normalizeContentType(request.getContentType(), request.getName()))
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
@@ -79,14 +80,14 @@ public class DocumentService {
             throw new IllegalStateException("Unable to store uploaded file", ex);
         }
 
-        String initialStatus = storageKey!= null && !storageKey.isBlank()? "Uploaded":"Created";
+        String initialStatus = storageKey!= null && !storageKey.isBlank()? "UPLOADED":"CREATED";
 
         DocumentRecord record = DocumentRecord.builder()
                 .id(documentId)
                 .name(request.getName() != null ? request.getName() : file.getOriginalFilename())
                 .type(normalizeType(request.getType()))
                 .tenant(request.getTenant())
-                .status(resolveStatus(initialStatus))
+                .status(resolveStatus(initialStatus, request.getDescription()))
                 .contentType(contentType)
                 .objectName(storageKey)
                 .createdAt(LocalDateTime.now())
@@ -159,7 +160,7 @@ public class DocumentService {
         String updatedName = request.getName() != null ? request.getName() : existing.getName();
         String updatedType = normalizeType(request.getType() != null ? request.getType() : existing.getType());
         String updatedTenant = request.getTenant() != null ? request.getTenant() : existing.getTenant();
-        JobStatus updatedStatus = resolveStatus(request.getStatus() != null ? request.getStatus() : statusCode(existing.getStatus()));
+        JobStatus updatedStatus = resolveStatus(request.getStatus() != null ? request.getStatus() : statusCode(existing.getStatus()), request.getDescription());
         String updatedContentType = normalizeContentType(request.getContentType(), updatedName);
 
         String newObjectName = existing.getObjectName();
@@ -212,12 +213,20 @@ public class DocumentService {
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
 
         String newStatusCode = request.getStatus();
+        String newDescription = request.getDescription();
         if (newStatusCode == null || newStatusCode.isBlank()) {
             throw new IllegalArgumentException("Status cannot be blank");
         }
 
-        JobStatus newStatus = resolveStatus(newStatusCode);
-        if (!statusCode(existing.getStatus()).equals(newStatus.getCode())) {
+        JobStatus newStatus = null;
+        if(existing!=null && existing.getStatus()!=null){
+            newStatus = resolveStatusByID(newStatusCode, newDescription,existing.getStatus().getId());
+        }else{
+            newStatus = resolveStatus(newStatusCode, newDescription);
+        }
+
+
+        if (!Objects.equals(statusCode(existing.getStatus()), newStatus.getCode())) {
             existing.setStatus(newStatus);
             existing.setUpdatedAt(LocalDateTime.now());
             DocumentRecord saved = documentRepository.save(existing);
@@ -313,19 +322,32 @@ public class DocumentService {
      * @param statusCode
      * @return
      */
-    private JobStatus resolveStatus(String statusCode) {
+    private JobStatus resolveStatus(String statusCode, String description) {
         String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
+        String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
         return jobStatusRepository.findByCode(normalized)
                 .orElseGet(() -> {
                     LocalDateTime now = LocalDateTime.now();
                     JobStatus newStatus = JobStatus.builder()
                             .code(normalized)
-                            .description(normalized)
+                            .description(normalizedDescription)
                             .createdAt(now)
                             .updatedAt(now)
                             .build();
                     return jobStatusRepository.save(newStatus);
                 });
+    }
+
+    private JobStatus resolveStatusByID(String statusCode, String description,UUID existingStatusId) {
+        String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
+        String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
+        JobStatus existingStatus = jobStatusRepository.findById(existingStatusId)
+            .orElseThrow(() -> new IllegalArgumentException("Status not found"));
+
+        existingStatus.setCode(normalized);
+        existingStatus.setDescription(normalizedDescription);
+        existingStatus.setUpdatedAt(LocalDateTime.now());
+        return jobStatusRepository.save(existingStatus);
     }
 
     /**
