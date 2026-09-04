@@ -11,7 +11,7 @@ import com.mulemind.job.entity.JobStatus;
 @Repository
 public interface JobStatusRepository extends JpaRepository<JobStatus, UUID> {
     
-    Optional<JobStatus> findByCode(String code);
+    Optional<JobStatus> findFirstByCodeOrderByCreatedAtAsc(String code);
 
     Optional<JobStatus> findByCodeAndId(String code, UUID id);
 }

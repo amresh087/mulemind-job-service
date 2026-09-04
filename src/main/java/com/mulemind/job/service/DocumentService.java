@@ -221,7 +221,7 @@ public class DocumentService {
 
         JobStatus newStatus = null;
         if(existing!=null && existing.getStatus()!=null){
-            newStatus = resolveStatusByID(newStatusCode, newDescription,existing.getStatus().getId());
+            newStatus = resolveStatus(newStatusCode, newDescription);
         }else{
             newStatus = resolveStatus(newStatusCode, newDescription);
         }
@@ -326,7 +326,7 @@ public class DocumentService {
     private JobStatus resolveStatus(String statusCode, String description) {
         String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
         String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
-        return jobStatusRepository.findByCode(normalized)
+        return jobStatusRepository.findFirstByCodeOrderByCreatedAtAsc(normalized)
                 .orElseGet(() -> {
                     LocalDateTime now = LocalDateTime.now();
                     JobStatus newStatus = JobStatus.builder()
@@ -340,28 +340,7 @@ public class DocumentService {
     }
 
     private JobStatus createStatus(String statusCode, String description) {
-        String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
-        String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
-        LocalDateTime now = LocalDateTime.now();
-        JobStatus newStatus = JobStatus.builder()
-                .code(normalized)
-                .description(normalizedDescription)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        return jobStatusRepository.save(newStatus);
-    }
-
-    private JobStatus resolveStatusByID(String statusCode, String description,UUID existingStatusId) {
-        String normalized = statusCode == null || statusCode.isBlank() ? "Created" : statusCode.trim();
-        String normalizedDescription = description == null || description.isBlank() ? "Created" : description.trim();
-        JobStatus existingStatus = jobStatusRepository.findById(existingStatusId)
-            .orElseThrow(() -> new IllegalArgumentException("Status not found"));
-
-        existingStatus.setCode(normalized);
-        existingStatus.setDescription(normalizedDescription);
-        existingStatus.setUpdatedAt(LocalDateTime.now());
-        return jobStatusRepository.save(existingStatus);
+        return resolveStatus(statusCode, description);
     }
 
     /**
