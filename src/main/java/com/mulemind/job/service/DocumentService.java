@@ -252,7 +252,7 @@ public class DocumentService {
         }
 
         if (existing.getObjectName() != null && !existing.getObjectName().isBlank()) {
-            documentStorageService.deleteFile(existing.getObjectName());
+            documentStorageService.deleteDocumentFiles(id, existing.getObjectName());
         }
 
         documentRepository.delete(existing);
@@ -444,7 +444,7 @@ public class DocumentService {
         String safeTenant = tenant == null ? "tenant" : tenant.replaceAll("[^a-zA-Z0-9_.-]", "_");
         String safeType = type == null ? "PDF" : type.replaceAll("[^a-zA-Z0-9_.-]", "_");
         String safeFileName = originalFileName == null ? "file" : originalFileName.replaceAll("[^a-zA-Z0-9_.-]", "_");
-        return String.format("tenant-%s/%s/%s", safeTenant, safeType, safeFileName);
+        return String.format("tenant-%s/%s/%s/%s", safeTenant, safeType, documentId, safeFileName);
     }
 
     /**

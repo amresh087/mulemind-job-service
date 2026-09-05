@@ -10,12 +10,16 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.Rollback;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.mulemind.job.dto.DocumentRequest;
 import com.mulemind.job.entity.JobStatusHistory;
 import com.mulemind.job.repository.JobStatusHistoryRepository;
 
 @SpringBootTest
+@Transactional
+@Rollback
 class DocumentStatusHistoryServiceTest {
 
     @Autowired

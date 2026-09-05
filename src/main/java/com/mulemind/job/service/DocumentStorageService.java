@@ -10,9 +10,12 @@ import io.minio.BucketExistsArgs;
 import io.minio.CopyObjectArgs;
 import io.minio.CopySource;
 import io.minio.MakeBucketArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.MinioClient;
+import io.minio.Result;
+import io.minio.messages.Item;
 
 @Service
 public class DocumentStorageService {
@@ -63,6 +66,35 @@ public class DocumentStorageService {
                     .build());
         } catch (Exception ex) {
             throw new IllegalStateException("Unable to delete file from MinIO", ex);
+        }
+    }
+
+    public void deleteDocumentFiles(UUID documentId, String objectName) {
+        if (documentId == null || objectName == null || objectName.isBlank()) {
+            return;
+        }
+
+        int tenantSeparator = objectName.indexOf('/');
+        String tenantPrefix = tenantSeparator > 0 ? objectName.substring(0, tenantSeparator) + "/" : "";
+        String documentPath = "/" + documentId + "/";
+        String documentFolder = "/" + documentId;
+
+        try {
+            for (Result<Item> itemResult : minioClient.listObjects(ListObjectsArgs.builder()
+                    .bucket(bucketName)
+                    .prefix(tenantPrefix)
+                    .recursive(true)
+                    .build())) {
+                String candidate = itemResult.get().objectName();
+                if (candidate.contains(documentPath) || candidate.endsWith(documentFolder)) {
+                    minioClient.removeObject(RemoveObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(candidate)
+                            .build());
+                }
+            }
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to delete document files from MinIO", ex);
         }
     }
 
